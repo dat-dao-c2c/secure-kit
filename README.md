@@ -112,3 +112,15 @@ This library generates keys using Node.js's cryptographically secure random numb
 
 ### Why Scrypt for passwords?
 Scrypt is a memory-hard password-based key derivation function (KDF) that is highly resistant to brute-force attacks using specialized hardware (ASICs/GPUs).
+
+## Testing
+
+Comprehensive test coverage is maintained for all cryptographic operations.
+
+| Test File | Status | Tests |
+| :--- | :--- | :---: |
+| `hash.test.ts` | ✅ Passed | 4 |
+| `encrypt.test.ts` | ✅ Passed | 5 |
+| `random.test.ts` | ✅ Passed | 4 |
+| `key.test.ts` | ✅ Passed | 4 |
+| **Total** | **✅ 100%** | **17** |
