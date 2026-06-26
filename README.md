@@ -13,44 +13,81 @@ npm install @datdm198x/secure-kit
 ```typescript
 import { hash, encrypt, generateAESKey } from '@datdm198x/secure-kit';
 
-// 1. Hashing
+// Hash data
 const hashed = hash('my data');
 
-// 2. Symmetric Encryption
+// Symmetric Encryption
 const key = generateAESKey();
 const encrypted = encrypt('my secret data', key);
 ```
 
-## Hash
-Provides robust one-way hashing and HMAC functionality.
-- `hash(data, algorithm)`: Supported algorithms: 'sha256', 'sha512'.
-- `hmac(data, secret, algorithm)`
+## Examples
 
-## Encrypt
-Supports both symmetric and asymmetric encryption.
-- Symmetric (AES-256-GCM): `encrypt(data, key)` - Authenticated encryption.
-- Asymmetric (RSA-OAEP): `encryptAsymmetric(data, publicKey)`
+### Password Hashing
+Securely hash passwords with salt automatically included.
 
-## Decrypt
-- Symmetric: `decrypt(encryptedData, key)`
-- Asymmetric: `decryptAsymmetric(encryptedData, privateKey)`
+```typescript
+import { hashPassword, verifyPassword } from '@datdm198x/secure-kit';
 
-## Password
-Secure password hashing using Scrypt with automatic salting.
-- `hashPassword(password)`: Returns `salt:hash`.
-- `verifyPassword(password, hashedPassword)`: Timing-safe verification.
+const password = 'mySecretPassword123';
 
-## Random
-Cryptographically secure random data generation.
-- `generateBytes(size)`
-- `generateHex(size)`
-- `generateUUID()`
-- `generateInt(min, max)`
+// 1. Hash the password for storage
+const hashedPassword = hashPassword(password);
 
-## Signature
-Digital signatures for data authenticity.
-- `sign(data, privateKey)`
-- `verify(data, signature, publicKey)`
+// 2. Verify a password attempt against the stored hash
+const isMatch = verifyPassword(password, hashedPassword);
+```
+
+### Symmetric Encryption (AES-256-GCM)
+Best for encrypting data at rest. Authenticated encryption ensures integrity and confidentiality.
+
+```typescript
+import { generateAESKey, encrypt, decrypt } from '@datdm198x/secure-kit';
+
+// 1. Generate a secure 256-bit key
+const key = generateAESKey();
+const data = 'Sensitive data to encrypt';
+
+// 2. Encrypt
+const encrypted = encrypt(data, key);
+
+// 3. Decrypt
+const decrypted = decrypt(encrypted, key);
+```
+
+### Asymmetric Encryption (RSA-OAEP)
+Best for securely sharing data between parties.
+
+```typescript
+import { generateRSA, encryptAsymmetric, decryptAsymmetric } from '@datdm198x/secure-kit';
+
+// 1. Generate key pair
+const { publicKey, privateKey } = generateRSA();
+const data = 'Sensitive data for RSA';
+
+// 2. Encrypt with Public Key
+const encrypted = encryptAsymmetric(data, publicKey);
+
+// 3. Decrypt with Private Key
+const decrypted = decryptAsymmetric(encrypted, privateKey);
+```
+
+### Digital Signature (RSA + SHA256)
+Best for verifying data authenticity and integrity.
+
+```typescript
+import { generateRSA, sign, verify } from '@datdm198x/secure-kit';
+
+// 1. Generate key pair
+const { publicKey, privateKey } = generateRSA();
+const data = 'Document to sign';
+
+// 2. Sign with Private Key
+const signature = sign(data, privateKey);
+
+// 3. Verify with Public Key
+const isValid = verify(data, signature, publicKey);
+```
 
 ## FAQ
 
@@ -62,4 +99,3 @@ This library generates keys using Node.js's cryptographically secure random numb
 
 ### Why Scrypt for passwords?
 Scrypt is a memory-hard password-based key derivation function (KDF) that is highly resistant to brute-force attacks using specialized hardware (ASICs/GPUs).
-
