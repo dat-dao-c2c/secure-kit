@@ -89,6 +89,19 @@ const signature = sign(data, privateKey);
 const isValid = verify(data, signature, publicKey);
 ```
 
+### Secure Random Generation
+Cryptographically secure random data generation.
+
+```typescript
+import { generateBytes, generateHex, generateUUID, generateInt } from '@datdm198x/secure-kit';
+
+// Generate a random UUID
+const uuid = generateUUID();
+
+// Generate a random integer between 1 and 100
+const int = generateInt(1, 100);
+```
+
 ## FAQ
 
 ### Why use AES-256-GCM?
