@@ -18,7 +18,23 @@ const hashed = hash('my data');
 
 // Symmetric Encryption
 const key = generateAESKey();
-const encrypted = encrypt('my secret data', key);
+
+// convert the key to a hex string for storage or transmission
+const keyHex = key.toString('hex');
+
+// convert the hex string back to a Buffer for decryption
+const keyBuffer = Buffer.from(keyHex, 'hex');
+
+// Encrypt data using the generated key
+const encrypted = encrypt('my secret data', keyBuffer);
+
+// Decrypt data using the same key
+const decrypted = decrypt(encrypted, keyBuffer);
+
+console.log('Hashed:', hashed);
+console.log('Key:', keyHex);
+console.log('Encrypted:', encrypted);
+console.log('Decrypted:', decrypted);
 ```
 
 ## Examples
@@ -46,13 +62,22 @@ import { generateAESKey, encrypt, decrypt } from '@datdm198x/secure-kit';
 
 // 1. Generate a secure 256-bit key
 const key = generateAESKey();
-const data = 'Sensitive data to encrypt';
 
-// 2. Encrypt
-const encrypted = encrypt(data, key);
+// convert the key to a hex string for storage or transmission
+const keyHex = key.toString('hex');
 
-// 3. Decrypt
-const decrypted = decrypt(encrypted, key);
+// convert the hex string back to a Buffer for decryption
+const keyBuffer = Buffer.from(keyHex, 'hex');
+
+// 2. Encrypt data using the generated key
+const encrypted = encrypt('my secret data', keyBuffer);
+
+// 3. Decrypt data using the same key
+const decrypted = decrypt(encrypted, keyBuffer); 
+
+console.log('Key:', keyHex);
+console.log('Encrypted:', encrypted);
+console.log('Decrypted:', decrypted);
 ```
 
 ### Asymmetric Encryption (RSA-OAEP)
