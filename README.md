@@ -5,13 +5,13 @@ A lightweight, secure, and easy-to-use cryptographic toolkit for Node.js, built 
 ## Installation
 
 ```bash
-npm install @dat-dao-c2c/secure-kit
+npm install @datdm198x/secure-kit
 ```
 
 ## Quick Start
 
 ```typescript
-import { hash, encrypt, generateAESKey } from '@dat-dao-c2c/secure-kit';
+import { hash, encrypt, generateAESKey } from '@datdm198x/secure-kit';
 
 // 1. Hashing
 const hashed = hash('my data');

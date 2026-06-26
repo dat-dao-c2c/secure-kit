@@ -1,17 +1,33 @@
 {
-  "name": "@dat-dao-c2c/secure-kit",
+  "name": "@datdm198x/secure-kit",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "A lightweight, secure, and easy-to-use cryptographic toolkit for Node.js.",
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    }
+  },
   "scripts": {
     "test": "vitest",
-    "build": "tsc"
+    "build": "tsup"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/dat-dao-c2c/secure-kit.git"
   },
-  "keywords": [],
+  "keywords": [
+    "crypto",
+    "security",
+    "hashing",
+    "encryption",
+    "password",
+    "authentication"
+  ],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
@@ -23,11 +39,16 @@
     "@types/node": "^26.0.1",
     "eslint": "^10.5.0",
     "prettier": "^3.8.4",
+    "tsup": "^8.5.1",
     "tsx": "^4.22.4",
     "typescript-eslint": "^8.62.0",
     "vitest": "^4.1.9"
   },
   "directories": {
     "test": "tests"
-  }
+  },
+  "bugs": {
+    "url": "https://github.com/dat-dao-c2c/secure-kit/issues"
+  },
+  "homepage": "https://github.com/dat-dao-c2c/secure-kit#readme"
 }

@@ -2,7 +2,6 @@ import {
   randomBytes, 
   scryptSync, 
   generateKeyPairSync, 
-  KeyPairSyncResult,
   KeyObject 
 } from 'crypto';
 
@@ -26,7 +25,7 @@ export function deriveKey(password: string, salt: Buffer, keyLength: number = 32
 /**
  * Generates an RSA key pair (4096-bit).
  */
-export function generateRSA(): KeyPairSyncResult<KeyObject, KeyObject> {
+export function generateRSA() {
   return generateKeyPairSync('rsa', {
     modulusLength: 4096,
     publicKeyEncoding: { type: 'spki', format: 'pem' },
@@ -37,7 +36,7 @@ export function generateRSA(): KeyPairSyncResult<KeyObject, KeyObject> {
 /**
  * Generates an Ed25519 key pair.
  */
-export function generateEd25519(): KeyPairSyncResult<KeyObject, KeyObject> {
+export function generateEd25519() {
   return generateKeyPairSync('ed25519', {
     publicKeyEncoding: { type: 'spki', format: 'pem' },
     privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
