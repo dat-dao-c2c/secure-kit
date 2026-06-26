@@ -1,6 +1,6 @@
 {
   "name": "@datdm198x/secure-kit",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "A lightweight, secure, and easy-to-use cryptographic toolkit for Node.js.",
   "files": [
     "dist"
