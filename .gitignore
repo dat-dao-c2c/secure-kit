@@ -1,0 +1,19 @@
+# dependencies
+node_modules/
+
+# build outputs
+dist/
+*.tsbuildinfo
+
+# environment variables
+.env
+
+# logs
+*.log
+
+# system files
+.DS_Store
+
+# testing
+coverage/
+.vitest/
