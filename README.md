@@ -154,7 +154,14 @@ const isValid = verify(data, signature, publicKey); // Result: true
 Cryptographically secure random data generation.
 
 ```typescript
-import { generateBytes, generateHex, generateUUID, generateInt } from '@datdm198x/secure-kit';
+import {
+  generateBytes,
+  generateHex,
+  generateUUID,
+  generateInt,
+  generateSecureString,
+  generateSecureStrings,
+} from '@datdm198x/secure-kit';
 
 // Generate random bytes (returns Buffer)
 const bytes = generateBytes(16); 
@@ -171,6 +178,18 @@ const uuid = generateUUID();
 // Generate a random integer between min and max (inclusive)
 const int = generateInt(1, 100);
 // Result: 42
+
+// Generate a secure random string (e.g. for API keys/tokens)
+const secureString = generateSecureString(20, {
+  letters: true,
+  numbers: true,
+  specialCharacters: true,
+});
+// Result: 'aZ3!k9Lp_2Qw@8Mv$1x('
+
+// Generate several secure strings at once
+const secureStrings = generateSecureStrings(5, 20, { specialCharacters: true });
+// Result: ['aZ3!k9Lp...', 'Qw8Mv$1x...', ...]
 ```
 
 ## FAQ
