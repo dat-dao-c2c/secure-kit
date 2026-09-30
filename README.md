@@ -6,7 +6,7 @@ A lightweight, secure, and easy-to-use cryptographic toolkit for Node.js, built 
 
 - **Zero runtime crypto dependencies** — thin, typed wrappers over Node.js's native `crypto` module.
 - **Dual build** — ships both CommonJS and ESM with TypeScript declarations.
-- **Command line tool** — `secret-kit` exposes the same features to shell scripts and CI. See [Command Line Interface](#command-line-interface-secret-kit).
+- **Command line tool** — `secret-kit` (alias `secure-kit`) exposes the same features to shell scripts and CI. See [Command Line Interface](#command-line-interface-secret-kit).
 
 | Category | Functions | Algorithm / Details |
 | :--- | :--- | :--- |
@@ -512,13 +512,17 @@ decryptAsymmetric(sessionSecret, partnerPrivate);  // Result: 'export-password-1
 
 The package ships a `secret-kit` command so you can use the same crypto from shell scripts, CI jobs, and the terminal.
 
+The same command is also installed as **`secure-kit`**, matching the package name. Both names behave identically; the examples below use `secret-kit`.
+
 ```bash
 # Use without installing
 npx -p @datdm198x/secure-kit secret-kit --help
+npx @datdm198x/secure-kit --help            # the package-name alias works directly with npx
 
 # Or install globally
 npm install -g @datdm198x/secure-kit
 secret-kit --help
+secure-kit --help                          # same command
 ```
 
 ### Conventions (important for scripts)
@@ -646,5 +650,5 @@ Comprehensive test coverage is maintained for all cryptographic operations.
 | `encrypt.test.ts` | ✅ Passed | 5 |
 | `random.test.ts` | ✅ Passed | 10 |
 | `key.test.ts` | ✅ Passed | 4 |
-| `cli.test.ts` | ✅ Passed | 19 |
-| **Total** | **✅ 100%** | **42** |
+| `cli.test.ts` | ✅ Passed | 20 |
+| **Total** | **✅ 100%** | **43** |

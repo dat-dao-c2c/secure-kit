@@ -11,7 +11,10 @@ interface Result {
   stderr: string;
 }
 
-function cli(argv: string[], options: { stdin?: string; env?: NodeJS.ProcessEnv } = {}): Result {
+function cli(
+  argv: string[],
+  options: { stdin?: string; env?: NodeJS.ProcessEnv; programName?: string } = {},
+): Result {
   let stdout = '';
   let stderr = '';
   const io: CliIO = {
@@ -20,7 +23,7 @@ function cli(argv: string[], options: { stdin?: string; env?: NodeJS.ProcessEnv 
     stderr: (text) => (stderr += text),
     env: options.env ?? {},
   };
-  const code = run(argv, io, '9.9.9');
+  const code = run(argv, io, { version: '9.9.9', programName: options.programName });
   return { code, stdout, stderr };
 }
 
@@ -31,6 +34,15 @@ describe('CLI: general', () => {
     expect(cli(['--help']).stdout).toContain('Usage: secret-kit <command>');
     expect(out(cli(['--version']))).toBe('9.9.9');
     expect(cli(['random', 'uuid', '--help']).stdout).toContain('Usage: secret-kit random uuid');
+  });
+
+  it('uses the invoked name (secret-kit or secure-kit) in messages', () => {
+    expect(cli(['--help']).stdout).toContain('Alias: secure-kit');
+
+    const alias = cli(['bogus'], { programName: 'secure-kit' });
+    expect(alias.stderr).toContain('secure-kit: unknown command "bogus"');
+    expect(alias.stderr).toContain('Alias: secret-kit');
+    expect(cli(['hash', '--help'], { programName: 'secure-kit' }).stdout).toContain('Usage: secure-kit hash');
   });
 
   it('exits with usage error for no args, unknown commands and unknown options', () => {

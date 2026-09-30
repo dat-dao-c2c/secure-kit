@@ -9,7 +9,8 @@
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",
   "bin": {
-    "secret-kit": "./dist/cli.js"
+    "secret-kit": "./dist/cli.js",
+    "secure-kit": "./dist/cli.js"
   },
   "exports": {
     ".": {
