@@ -43,6 +43,8 @@ interface CommandContext {
   values: Values;
   positionals: string[];
   io: CliIO;
+  /** Name the user invoked (secret-kit or secure-kit), used in messages. */
+  prog: string;
 }
 
 interface OptionSpec {
@@ -148,7 +150,7 @@ function readSecret(ctx: CommandContext, prefix: 'secret' | 'key'): string {
 function readAesKey(ctx: CommandContext): Buffer {
   const hex = readSecret(ctx, 'key').trim();
   if (!/^[0-9a-fA-F]{64}$/.test(hex)) {
-    throw new UsageError('AES key must be 64 hex characters (32 bytes); generate one with: secret-kit keygen aes');
+    throw new UsageError(`AES key must be 64 hex characters (32 bytes); generate one with: ${ctx.prog} keygen aes`);
   }
   return Buffer.from(hex, 'hex');
 }
@@ -259,7 +261,7 @@ const COMMANDS: Record<string, Command> = {
       try {
         isMatch = verifyPassword(password, storedHash);
       } catch {
-        throw new UsageError('malformed --hash (expected output of: secret-kit password-hash)');
+        throw new UsageError(`malformed --hash (expected output of: ${ctx.prog} password-hash)`);
       }
       return reportVerification(ctx.io, ctx.values, isMatch);
     },
@@ -287,7 +289,7 @@ const COMMANDS: Record<string, Command> = {
       try {
         plaintext = decrypt(ciphertext, key);
       } catch {
-        ctx.io.stderr('secret-kit: decryption failed (wrong key, or data is corrupted or tampered with)\n');
+        ctx.io.stderr(`${ctx.prog}: decryption failed (wrong key, or data is corrupted or tampered with)\n`);
         return EXIT_FAILED;
       }
       writeLine(ctx.io, plaintext);
@@ -324,7 +326,7 @@ const COMMANDS: Record<string, Command> = {
       try {
         plaintext = decryptAsymmetric(ciphertext, privateKey);
       } catch {
-        ctx.io.stderr('secret-kit: decryption failed (wrong key, or data is corrupted)\n');
+        ctx.io.stderr(`${ctx.prog}: decryption failed (wrong key, or data is corrupted)\n`);
         return EXIT_FAILED;
       }
       writeLine(ctx.io, plaintext);
@@ -470,13 +472,22 @@ const COMMANDS: Record<string, Command> = {
 
 const GROUPS = new Set(['keygen', 'random']);
 
+/** Both names are installed as bins and point at the same entry file. */
+export const PROGRAM_NAMES = ['secret-kit', 'secure-kit'] as const;
+export const DEFAULT_PROGRAM_NAME = PROGRAM_NAMES[0];
+
+export interface RunOptions {
+  version?: string;
+  programName?: string;
+}
+
 // ---------- help ----------
 
-function mainHelp(): string {
+function mainHelp(prog: string): string {
   const width = Math.max(...Object.keys(COMMANDS).map((name) => name.length));
   const lines = Object.entries(COMMANDS).map(([name, cmd]) => `  ${name.padEnd(width)}  ${cmd.summary}`);
   return [
-    'Usage: secret-kit <command> [options] [input]',
+    `Usage: ${prog} <command> [options] [input]`,
     '',
     'Commands:',
     ...lines,
@@ -486,22 +497,24 @@ function mainHelp(): string {
     'Secrets: never passed as values; read from --*-env VAR or --*-file PATH.',
     'Exit:    0 success, 1 verification/decryption failed, 2 usage error.',
     '',
-    'Run "secret-kit <command> --help" for command details.',
+    `Run "${prog} <command> --help" for command details.`,
+    `Alias: ${PROGRAM_NAMES.filter((name) => name !== prog).join(', ')} (same command).`,
     '',
   ].join('\n');
 }
 
-function commandHelp(cmd: Command): string {
-  return `Usage: secret-kit ${cmd.usage}\n\n${cmd.summary}\n`;
+function commandHelp(prog: string, cmd: Command): string {
+  return `Usage: ${prog} ${cmd.usage}\n\n${cmd.summary}\n`;
 }
 
 // ---------- entry ----------
 
-export function run(argv: string[], io: CliIO, version = 'dev'): number {
+export function run(argv: string[], io: CliIO, options: RunOptions = {}): number {
+  const { version = 'dev', programName: prog = DEFAULT_PROGRAM_NAME } = options;
   const [first, second] = argv;
 
   if (first === undefined || first === 'help' || first === '--help' || first === '-h') {
-    io.stdout(mainHelp());
+    io.stdout(mainHelp(prog));
     return first === undefined ? EXIT_USAGE : EXIT_OK;
   }
   if (first === '--version' || first === '-v') {
@@ -515,12 +528,12 @@ export function run(argv: string[], io: CliIO, version = 'dev'): number {
   const command = COMMANDS[name];
 
   if (!command) {
-    io.stderr(`secret-kit: unknown command "${name}"\n\n${mainHelp()}`);
+    io.stderr(`${prog}: unknown command "${name}"\n\n${mainHelp(prog)}`);
     return EXIT_USAGE;
   }
 
   if (rest.includes('--help') || rest.includes('-h')) {
-    io.stdout(commandHelp(command));
+    io.stdout(commandHelp(prog, command));
     return EXIT_OK;
   }
 
@@ -531,11 +544,11 @@ export function run(argv: string[], io: CliIO, version = 'dev'): number {
       allowPositionals: true,
       strict: true,
     });
-    return command.run({ values: values as Values, positionals, io });
+    return command.run({ values: values as Values, positionals, io, prog });
   } catch (error) {
     const isUsage = error instanceof UsageError || (error as NodeJS.ErrnoException).code?.startsWith('ERR_PARSE_ARGS');
     if (!isUsage) throw error;
-    io.stderr(`secret-kit: ${(error as Error).message}\nUsage: secret-kit ${command.usage}\n`);
+    io.stderr(`${prog}: ${(error as Error).message}\nUsage: ${prog} ${command.usage}\n`);
     return EXIT_USAGE;
   }
 }
