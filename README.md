@@ -162,7 +162,7 @@ Every feature is a thin wrapper over Node.js's native `crypto` module. This sect
 
 **Decrypting** (`decrypt(payload, key)`):
 
-1. Split on `:` and decode the IV, tag, and ciphertext from hex.
+1. Check the format strictly: exactly a 12-byte IV, a **16-byte** tag, and even-length hex ciphertext. Anything else throws `Invalid encrypted data format.` A shortened tag is rejected here; GCM would otherwise accept it and make forgeries much easier.
 2. Decrypt and verify the tag. If the key is wrong or **any** byte of the payload was modified, GCM authentication fails and `decrypt` **throws**. You never get silently corrupted plaintext.
 
 - **Key limit:** with random 12-byte IVs, NIST recommends at most about 2³² encryptions per key. Rotate keys well before that.
@@ -798,7 +798,7 @@ Argon2id won the Password Hashing Competition and is OWASP's first choice for pa
 
 | Version | Changes |
 | :--- | :--- |
-| 2.0.0 (unreleased) | **Breaking.** Password hashing moves from scrypt to Argon2id (Node's built-in `crypto.argon2`). `hashPassword` / `verifyPassword` are now async; `hashPasswordSync`, `verifyPasswordSync`, `needsRehash`, and `isPasswordHash` added. `verifyPassword` returns `false` instead of throwing for malformed hashes. 1.x scrypt hashes still verify. Requires Node.js ≥ 24.7. |
+| 2.0.0 (unreleased) | **Breaking.** Password hashing moves from scrypt to Argon2id (Node's built-in `crypto.argon2`). `hashPassword` / `verifyPassword` are now async; `hashPasswordSync`, `verifyPasswordSync`, `needsRehash`, and `isPasswordHash` added. `verifyPassword` returns `false` instead of throwing for malformed hashes. 1.x scrypt hashes still verify. Requires Node.js ≥ 24.7. **Fix:** `decrypt` rejects AES-GCM authentication tags shorter than 16 bytes (previously a 4-byte tag was accepted, reducing forgery resistance from 2¹²⁸ to about 2³² attempts) and validates the IV length and hex encoding. `encrypt('')` output now decrypts. |
 | 1.2.0 | The CLI is also installed as `secure-kit`, so `npx @datdm198x/secure-kit ...` works directly. |
 | 1.1.0 | Added the `secret-kit` CLI. |
 | 1.0.6 | Added `generateSecureString` / `generateSecureStrings`. |
@@ -811,8 +811,8 @@ Comprehensive test coverage is maintained for all cryptographic operations.
 | :--- | :--- | :---: |
 | `hash.test.ts` | ✅ Passed | 3 |
 | `password.test.ts` | ✅ Passed | 16 |
-| `encrypt.test.ts` | ✅ Passed | 5 |
+| `encrypt.test.ts` | ✅ Passed | 11 |
 | `random.test.ts` | ✅ Passed | 10 |
 | `key.test.ts` | ✅ Passed | 4 |
-| `cli.test.ts` | ✅ Passed | 22 |
-| **Total** | **✅ 100%** | **60** |
+| `cli.test.ts` | ✅ Passed | 23 |
+| **Total** | **✅ 100%** | **67** |
