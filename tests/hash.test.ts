@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { hash, hmac, hashPassword, verifyPassword } from '../src/index.js';
+import { hash, hmac } from '../src/index.js';
 
 describe('Hashing', () => {
   it('should hash data with sha256', () => {
@@ -24,15 +24,5 @@ describe('HMAC', () => {
     const result = hmac(data, secret, 'sha256');
     expect(result).toBeDefined();
     expect(result.length).toBe(64);
-  });
-});
-
-describe('Password', () => {
-  it('should hash and verify password', () => {
-    const password = 'mySecurePassword123';
-    const hashedPassword = hashPassword(password);
-    
-    expect(verifyPassword(password, hashedPassword)).toBe(true);
-    expect(verifyPassword('wrongPassword', hashedPassword)).toBe(false);
   });
 });

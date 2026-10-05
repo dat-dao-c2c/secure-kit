@@ -7,12 +7,13 @@ A lightweight, secure, and easy-to-use cryptographic toolkit for Node.js, built 
 - **Zero runtime crypto dependencies** — thin, typed wrappers over Node.js's native `crypto` module.
 - **Dual build** — ships both CommonJS and ESM with TypeScript declarations.
 - **Command line tool** — `secret-kit` (alias `secure-kit`) exposes the same features to shell scripts and CI. See [Command Line Interface](#command-line-interface-secret-kit).
+- **Documented internals** — see [How It Works](#how-it-works) for what each function does step by step.
 
 | Category | Functions | Algorithm / Details |
 | :--- | :--- | :--- |
 | Hashing | `hash` | SHA-256 (default) or SHA-512, hex output |
 | HMAC | `hmac` | HMAC-SHA-256 (default) or HMAC-SHA-512, hex output |
-| Password hashing | `hashPassword`, `verifyPassword` | scrypt (N=16384, r=8, p=1), 16-byte random salt, 64-byte key, timing-safe compare. Output: `salt:hash` (hex) |
+| Password hashing | `hashPassword`, `verifyPassword`, `needsRehash` (+ `*Sync` variants) | Argon2id (64 MiB, t=3, p=4), 16-byte random salt, 32-byte tag, NFKC normalization, timing-safe compare. Output: PHC string `$argon2id$v=19$m=…,t=…,p=…$salt$hash`. Still verifies 1.x scrypt hashes |
 | Symmetric encryption | `encrypt`, `decrypt` | AES-256-GCM (authenticated), 12-byte random IV. Output: `iv:authTag:ciphertext` (hex) |
 | Asymmetric encryption | `encryptAsymmetric`, `decryptAsymmetric` | RSA-OAEP with SHA-256, base64 output |
 | Digital signatures | `sign`, `verify` | SHA-256 signatures (RSA), base64 output |
@@ -24,6 +25,8 @@ A lightweight, secure, and easy-to-use cryptographic toolkit for Node.js, built 
 ```bash
 npm install @datdm198x/secure-kit
 ```
+
+Requires **Node.js 24.7 or later** (for the built-in `crypto.argon2`).
 
 ## Quick Start
 
@@ -90,22 +93,167 @@ const isVerified = timingSafeEqual(
 ```
 
 
+## How It Works
+
+Every feature is a thin wrapper over Node.js's native `crypto` module. This section explains what each function does internally, what its output looks like, and the limits you should know about.
+
+### Hash (`hash`)
+
+1. The input string is encoded as UTF-8.
+2. It is hashed with SHA-256 (default) or SHA-512 via `crypto.createHash`.
+3. The digest is returned as lowercase hex: 64 characters for SHA-256, 128 for SHA-512.
+
+- **Deterministic:** the same input always gives the same output, so it is good for integrity checks and for hashing *high-entropy* values such as random API keys.
+- **Not for passwords or low-entropy data** (emails, phone numbers): SHA-2 is fast, so attackers can try billions of guesses per second. Use `hashPassword` or `hmac` instead.
+
+### HMAC (`hmac`)
+
+1. The secret string (UTF-8) becomes the HMAC key.
+2. `crypto.createHmac` computes HMAC-SHA-256 (default) or HMAC-SHA-512 over the UTF-8 input (RFC 2104).
+3. The tag is returned as hex.
+
+- Only someone holding the secret can produce a matching tag, so it proves the message came from a secret holder and wasn't modified.
+- Because the output depends on the secret, it also works as a **blind index**: you can look up `hmac(email, secret)` without storing a hash that can be brute-forced from email lists.
+- `hmac` only *computes* the tag. When checking a received tag, compare with `crypto.timingSafeEqual` (as in the HMAC example) so response time doesn't leak how many characters matched. The CLI's `hmac-verify` already does this.
+
+### Password hashing (`hashPassword`, `verifyPassword`, `needsRehash`)
+
+**Hashing** (`hashPassword(password, options?)`):
+
+1. **Validate:** the password must be a non-empty string. It is normalized to Unicode NFKC (NIST SP 800-63B), so visually identical input typed on different keyboards gives the same result. After normalization it must be at most 1024 UTF-8 bytes.
+2. **Resolve cost:** defaults are `memory: 65536` KiB (64 MiB), `passes: 3`, `parallelism: 4`. Custom values are checked against the OWASP minimum (19 MiB, 2 passes) and a safety cap (4 GiB, 64 passes, 64 lanes).
+3. **Salt:** 16 random bytes from `crypto.randomBytes`, unique per hash, so two users with the same password get different hashes and precomputed (rainbow) tables don't work.
+4. **Derive:** `crypto.argon2('argon2id', …)` produces a 32-byte tag. Argon2id fills `memory` KiB of RAM and makes `passes` passes over it, so each guess costs an attacker the same memory and time it costs you. GPUs and ASICs can't run many guesses in parallel cheaply.
+5. **Encode:** the result is a standard PHC string, with salt and tag in unpadded base64:
+
+   ```
+   $argon2id$v=19$m=65536,t=3,p=4$<salt>$<tag>
+    algorithm  ver  cost params    16 B   32 B
+   ```
+
+   Because the cost parameters travel with the hash, you can raise them later without breaking existing hashes.
+
+**Verifying** (`verifyPassword(password, storedHash)`):
+
+1. **Parse** the stored hash strictly:
+   - An Argon2id PHC string is accepted if its parameters are within safe bounds (memory ≤ 4 GiB, passes ≤ 64, salt 8–64 bytes, tag 16–64 bytes). The upper bounds stop a crafted hash from making verification consume unbounded memory or CPU. Weaker-but-valid hashes from other Argon2id libraries are accepted.
+   - A legacy 1.x scrypt hash (`32 hex chars : 128 hex chars`) is also accepted.
+   - Anything else returns `false`.
+2. **Re-derive** with the stored salt and parameters:
+   - Argon2id: the password is normalized the same way as when hashing.
+   - Legacy scrypt (N=16384, r=8, p=1, 64-byte key): the raw password is used, because 1.x didn't normalize.
+3. **Compare** the derived tag with the stored tag using `crypto.timingSafeEqual`, which takes the same time whether the first byte or the last byte differs.
+4. **Never throw** for bad input: a wrong password, an empty or over-long password, or a malformed hash all return `false`.
+
+**Upgrading** (`needsRehash(storedHash, options?)`) returns `true` when the stored hash is legacy scrypt, malformed, or uses Argon2id parameters different from the target. Call it right after a *successful* `verifyPassword`, while you still have the plaintext, and store a fresh `hashPassword` result. Users are migrated gradually as they log in.
+
+**Async vs sync:** `hashPassword` / `verifyPassword` run Argon2 on libuv's thread pool and return Promises, so a server keeps handling other requests during the ~30 ms of hashing. `hashPasswordSync` / `verifyPasswordSync` block the event loop; use them only in scripts and CLIs. The thread pool has 4 threads by default (`UV_THREADPOOL_SIZE`), which caps concurrent hashes per process.
+
+`isPasswordHash(value)` tells you whether a string is in a format `verifyPassword` understands, without doing any hashing.
+
+### Symmetric encryption (`encrypt`, `decrypt`)
+
+**Encrypting** (`encrypt(text, key)`):
+
+1. The key must be exactly 32 bytes (AES-256). `generateAESKey()` creates one; Node throws for any other length.
+2. A fresh random 12-byte IV (nonce) is generated for every call. Encrypting the same text twice gives different output.
+3. AES-256-GCM encrypts the UTF-8 text and computes a 16-byte authentication tag over the ciphertext.
+4. Output: `ivHex:authTagHex:ciphertextHex`. The ciphertext is the same length as the input.
+
+**Decrypting** (`decrypt(payload, key)`):
+
+1. Split on `:` and decode the IV, tag, and ciphertext from hex.
+2. Decrypt and verify the tag. If the key is wrong or **any** byte of the payload was modified, GCM authentication fails and `decrypt` **throws**. You never get silently corrupted plaintext.
+
+- **Key limit:** with random 12-byte IVs, NIST recommends at most about 2³² encryptions per key. Rotate keys well before that.
+- **Key storage:** the key is the only secret. Keep it in a secret manager (AWS Secrets Manager, Vault, KMS), never in source code or in the same database as the ciphertext.
+
+### Asymmetric encryption (`encryptAsymmetric`, `decryptAsymmetric`)
+
+1. `encryptAsymmetric(text, publicKey)` encrypts the UTF-8 text with RSA using OAEP padding and SHA-256 (`crypto.publicEncrypt`). OAEP adds randomness, so the same text encrypts differently each time. Output is base64.
+2. `decryptAsymmetric(payload, privateKey)` reverses it with `crypto.privateDecrypt`. Only the private-key holder can decrypt. A wrong key or modified payload makes it throw.
+
+- **Size limit:** a 4096-bit key holds at most 446 bytes of plaintext (512 − 2×32 − 2). For larger data use *hybrid encryption*: encrypt the data with `encrypt` under a fresh AES key, then encrypt only that AES key with `encryptAsymmetric`.
+- Both functions take `KeyObject`s. Convert PEM strings with `crypto.createPublicKey` / `crypto.createPrivateKey`.
+
+### Digital signatures (`sign`, `verify`)
+
+1. `sign(text, privateKey)` hashes the UTF-8 text with SHA-256 and signs the digest with the RSA private key (`crypto.sign`, RSASSA-PKCS1-v1_5 padding). Output is base64; a 4096-bit key gives a 512-byte (684-character) signature.
+2. `verify(text, signature, publicKey)` recomputes the SHA-256 digest and checks it against the signature with the public key. It returns `true` only if the text is byte-for-byte unchanged **and** was signed by the matching private key.
+
+- Anyone with the public key can verify, so signatures prove authorship to third parties. (An HMAC can only be checked by someone who holds the shared secret.)
+- Signatures don't hide the data. Combine with encryption if it is confidential.
+- `sign`/`verify` work with RSA keys only. They always pass `'sha256'`, which Node rejects for Ed25519 keys.
+
+### Key management (`generateAESKey`, `deriveKey`, `generateRSA`, `generateEd25519`)
+
+| Function | How it works | Output |
+| :--- | :--- | :--- |
+| `generateAESKey()` | 32 bytes from `crypto.randomBytes` | `Buffer` (store it as hex or base64) |
+| `deriveKey(password, salt, keyLength = 32)` | scrypt with Node's defaults (N=16384, r=8, p=1). The same password and salt always give the same key, so store the salt (not secret, but unique per key) next to the ciphertext. Intended for turning a passphrase into an *encryption key*. For storing passwords, use `hashPassword`. | `Buffer` of `keyLength` bytes |
+| `generateRSA()` | `crypto.generateKeyPairSync('rsa', { modulusLength: 4096 })`, public exponent 65537. Takes about 0.5–2 s, depending on hardware. | `{ publicKey, privateKey }` as PEM strings (SPKI / unencrypted PKCS#8) |
+| `generateEd25519()` | `crypto.generateKeyPairSync('ed25519')` | `{ publicKey, privateKey }` as PEM strings |
+
+The private key PEM is **not** password-protected. Store it with restricted permissions (the CLI's `keygen rsa` writes it with mode `0600`) or in a secret manager.
+
+### Secure random (`generateBytes`, `generateHex`, `generateUUID`, `generateInt`, `generateSecureString`, `generateSecureStrings`)
+
+All functions use the operating system's cryptographically secure random number generator (CSPRNG) through Node's `crypto`. Never use `Math.random()` for security values.
+
+| Function | How it works |
+| :--- | :--- |
+| `generateBytes(n)` / `generateHex(n)` | `crypto.randomBytes(n)`. Hex output is `2n` characters. 32 bytes = 256 bits of entropy. |
+| `generateUUID()` | `crypto.randomUUID()`: an RFC 9562 version 4 UUID with 122 random bits. |
+| `generateInt(min, max)` | `crypto.randomInt`, uniform over `[min, max)` (max is **exclusive**). It uses rejection sampling, so there is no modulo bias. `max − min` must be below 2⁴⁸. |
+| `generateSecureString(length, options)` | Builds a character pool from the enabled sets (52 letters, 10 digits, 29 symbols), then picks each character with `crypto.randomInt(pool.length)` (uniform, no modulo bias). Entropy is `length × log₂(pool size)`: for example, 20 letters and digits ≈ 119 bits. |
+| `generateSecureStrings(count, length, options)` | Calls `generateSecureString` `count` times independently. |
+
+### Command line tool (`secret-kit` / `secure-kit`)
+
+1. **Parse:** the first word(s) pick the command (`keygen` and `random` take a sub-command). Options are parsed with Node's `util.parseArgs` in strict mode, so unknown options are rejected.
+2. **Read input:** from the last argument, or stdin when it is omitted or `-`. One trailing newline is stripped unless `--raw` is given.
+3. **Read secrets safely:**
+   - AES keys and HMAC secrets come only from `--key-env` / `--secret-env` (an environment variable) or `--key-file` / `--secret-file`, never from option values, which would show up in `ps` and shell history. AES keys must be 64 hex characters.
+   - Passwords are read **only** from stdin.
+4. **Call the library:** the commands call the same functions documented above. Password commands use the `*Sync` variants, which is fine for a short-lived process. `password-verify` checks the `--hash` format before reading stdin.
+5. **Report:** the result goes to stdout; errors go to stderr. Exit codes: `0` success, `1` verification or decryption failed, `2` usage error. Scripts can branch on exit codes alone with `-q`.
+
 ## Examples
 
 ### Password Hashing
-Securely hash passwords with salt automatically included.
+Securely hash passwords with Argon2id. The salt and cost parameters are stored inside the hash string.
 
 ```typescript
-import { hashPassword, verifyPassword } from '@datdm198x/secure-kit';
+import { hashPassword, verifyPassword, needsRehash } from '@datdm198x/secure-kit';
 
 const password = 'mySecretPassword123';
 
 // 1. Hash the password for storage
-const hashedPassword = hashPassword(password); // Result: 'salt:hash' (hex)
+const hashedPassword = await hashPassword(password);
+// Result: '$argon2id$v=19$m=65536,t=3,p=4$<salt>$<hash>'
 
 // 2. Verify a password attempt against the stored hash
-const isMatch = verifyPassword(password, hashedPassword); // Result: true
+const isMatch = await verifyPassword(password, hashedPassword); // Result: true
+
+// 3. After a successful login, upgrade old or weaker hashes
+if (isMatch && needsRehash(hashedPassword)) {
+  // save await hashPassword(password) in place of the old hash
+}
 ```
+
+| Detail | Behavior |
+| :--- | :--- |
+| Cost | Defaults: `memory: 65536` (KiB = 64 MiB), `passes: 3`, `parallelism: 4`. Override with `hashPassword(pw, { memory, passes, parallelism })`. Minimums: 19456 KiB and 2 passes (OWASP). Each hash takes ~30 ms and uses `memory` KiB of RAM while running, so size your pods for concurrent logins. |
+| Input | Passwords are NFKC-normalized. Empty or over 1024 bytes → `hashPassword` throws `RangeError`; `verifyPassword` returns `false`. |
+| Errors | `verifyPassword` never throws for bad input. Malformed or unsupported hashes return `false`. |
+| Sync | `hashPasswordSync` / `verifyPasswordSync` block the event loop. Use them in scripts and CLIs, not in servers. |
+| Interop | Standard PHC format, so hashes from other Argon2id libraries (e.g. `argon2` on npm, `argon2-cffi`) verify too. |
+
+#### Migrating from 1.x (scrypt)
+
+- `hashPassword` and `verifyPassword` are now **async** (return Promises). Add `await`, or switch to the `*Sync` variants.
+- Existing `salt:hash` scrypt hashes **still verify**. `needsRehash` returns `true` for them, so users are moved to Argon2id at their next login (see above). No bulk migration is needed.
+- Widen your `password_hash` column if it is fixed-width: new hashes are about 100 characters.
 
 ### Symmetric Encryption (AES-256-GCM)
 Best for encrypting data at rest. Authenticated encryption ensures integrity and confidentiality.
@@ -287,7 +435,7 @@ const WEBHOOK_SECRET = requireEnv('WEBHOOK_SECRET');
 
 Each field is protected in a different way, depending on how you need to use it later:
 
-- **Password** → `hashPassword` (salted scrypt). You only ever need to *check* it, never read it back. Never store it in plaintext or encrypt it.
+- **Password** → `hashPassword` (salted Argon2id). You only ever need to *check* it, never read it back. Never store it in plaintext or encrypt it.
 - **Phone number (PII)** → `encrypt` (AES-256-GCM), because you need to read it back later.
 - **Email lookup** → `hmac` creates a *blind index*. You can look users up by email without storing a plain, searchable hash. A plain `hash(email)` can be brute-forced from lists of known emails; an HMAC needs the secret.
 
@@ -298,7 +446,7 @@ import { generateUUID, hashPassword, encrypt, hmac } from '@datdm198x/secure-kit
 type UserRecord = {
   id: string;             // random UUID, safe to expose
   emailIndex: string;     // HMAC of the normalized email, used only for lookups
-  passwordHash: string;   // 'salt:hash', used only for verification
+  passwordHash: string;   // '$argon2id$...', used only for verification
   phoneEncrypted: string; // 'iv:authTag:ciphertext', can be decrypted with dataKey
   apiKeyHash?: string;    // set in Step 5
 };
@@ -311,11 +459,11 @@ const users = new Map<string, UserRecord>();
 // and the user couldn't log in with a different capitalization.
 const emailIndexOf = (email: string) => hmac(email.trim().toLowerCase(), EMAIL_INDEX_SECRET);
 
-function register(email: string, password: string, phone: string): UserRecord {
+async function register(email: string, password: string, phone: string): Promise<UserRecord> {
   const user: UserRecord = {
     id: generateUUID(),                      // 1. Random, unguessable user id.
     emailIndex: emailIndexOf(email),         // 2. Lookup key for login (Step 3).
-    passwordHash: hashPassword(password),    // 3. Slow, salted, one-way. Can't be reversed.
+    passwordHash: await hashPassword(password), // 3. Slow, salted, one-way. Can't be reversed.
     phoneEncrypted: encrypt(phone, dataKey), // 4. Reversible, but only with dataKey (Step 4).
   };
 
@@ -325,7 +473,7 @@ function register(email: string, password: string, phone: string): UserRecord {
 }
 
 // Example: register Alice.
-const user = register('Alice@Example.com', 'correct horse battery staple', '+84 912 345 678');
+const user = await register('Alice@Example.com', 'correct horse battery staple', '+84 912 345 678');
 ```
 
 ### Step 3 — Log in
@@ -333,9 +481,9 @@ const user = register('Alice@Example.com', 'correct horse battery staple', '+84 
 > **Goal:** check a login attempt. **You need:** email and password from the login form. **You get:** the `UserRecord` on success, or `null` on failure.
 
 ```typescript
-import { verifyPassword } from '@datdm198x/secure-kit';
+import { hashPassword, verifyPassword, needsRehash } from '@datdm198x/secure-kit';
 
-function login(email: string, password: string): UserRecord | null {
+async function login(email: string, password: string): Promise<UserRecord | null> {
   // 1. Compute the same blind index as in Step 2. The same email always gives the same index.
   const index = emailIndexOf(email);
 
@@ -346,13 +494,18 @@ function login(email: string, password: string): UserRecord | null {
   //    verifyPassword re-hashes the attempt with the stored salt and compares in constant time.
   // 4. Return the same result for "unknown email" and "wrong password"
   //    so attackers can't tell which accounts exist.
-  if (!found || !verifyPassword(password, found.passwordHash)) return null;
+  if (!found || !(await verifyPassword(password, found.passwordHash))) return null;
+
+  // 5. Transparently upgrade old (1.x scrypt) or weaker hashes while we have the plaintext.
+  if (needsRehash(found.passwordHash)) {
+    found.passwordHash = await hashPassword(password);
+  }
   return found;
 }
 
 // Capitalization doesn't matter because the email is normalized.
-login('alice@example.com', 'correct horse battery staple'); // Result: UserRecord
-login('alice@example.com', 'wrong password');               // Result: null
+await login('alice@example.com', 'correct horse battery staple'); // Result: UserRecord
+await login('alice@example.com', 'wrong password');               // Result: null
 ```
 
 > Rate-limit login attempts at the API layer. Password hashing slows down brute-force attacks but doesn't stop them.
@@ -377,7 +530,7 @@ If the ciphertext was tampered with, or the wrong key is used, `decrypt` throws.
 
 > **Goal:** give the user a key for programmatic access. **You need:** a logged-in user. **You get:** a key to show the user once, and a hash to store.
 
-Generate a high-entropy key and show it to the user **once**. Store only its hash. A fast SHA-256 is fine here because the key is random and long. Passwords are low-entropy, which is why they need scrypt instead.
+Generate a high-entropy key and show it to the user **once**. Store only its hash. A fast SHA-256 is fine here because the key is random and long. Passwords are low-entropy, which is why they need Argon2id instead.
 
 ```typescript
 import { generateSecureString, hash } from '@datdm198x/secure-kit';
@@ -499,7 +652,7 @@ decryptAsymmetric(sessionSecret, partnerPrivate);  // Result: 'export-password-1
 
 | Need | Use | Why |
 | :--- | :--- | :--- |
-| Store a password | `hashPassword` / `verifyPassword` | Slow, salted, one-way |
+| Store a password | `hashPassword` / `verifyPassword` / `needsRehash` | Slow, memory-hard, salted, one-way |
 | Store data you must read back | `encrypt` / `decrypt` | Confidentiality and tamper detection |
 | Look up by a sensitive value | `hmac` (blind index) | Deterministic but needs a secret |
 | Store a random token or API key | `hash` | Fast is OK because the input is high-entropy |
@@ -543,8 +696,8 @@ secure-kit --help                          # same command
 | `hash [-a sha256\|sha512] [TEXT]` | Hash text |
 | `hmac --secret-env VAR [-a ...] [TEXT]` | Create an HMAC signature |
 | `hmac-verify --signature HEX --secret-env VAR [TEXT]` | Verify an HMAC signature |
-| `password-hash < password` | Hash a password (scrypt) |
-| `password-verify --hash HASH < password` | Check a password against a hash |
+| `password-hash < password` | Hash a password (Argon2id) |
+| `password-verify --hash HASH < password` | Check a password against a hash (Argon2id, or a 1.x scrypt hash) |
 | `encrypt --key-env VAR [TEXT]` | Encrypt with AES-256-GCM |
 | `decrypt --key-env VAR [CIPHERTEXT]` | Decrypt `encrypt` output |
 | `rsa-encrypt --public-key PATH [TEXT]` | Encrypt a small secret with RSA-OAEP |
@@ -606,6 +759,7 @@ fi
 read -rs PASSWORD
 HASH=$(printf '%s' "$PASSWORD" | secret-kit password-hash)
 
+# Single-quote the hash if you paste it literally: it contains '$'.
 printf '%s' "$PASSWORD" | secret-kit password-verify -q --hash "$HASH" && echo "match"
 ```
 
@@ -637,8 +791,17 @@ AES-GCM provides both confidentiality and data integrity (authentication), makin
 ### Are my keys secure?
 This library generates keys using Node.js's cryptographically secure random number generator (`randomBytes`). Ensure you store your keys securely (e.g., environment variables, HashiCorp Vault, AWS KMS) and never hardcode them.
 
-### Why Scrypt for passwords?
-Scrypt is a memory-hard password-based key derivation function (KDF) that is highly resistant to brute-force attacks using specialized hardware (ASICs/GPUs).
+### Why Argon2id for passwords?
+Argon2id won the Password Hashing Competition and is OWASP's first choice for password storage. It is memory-hard, which makes GPU/ASIC cracking expensive, and the hybrid `id` variant also resists side-channel attacks. This library uses Node's built-in `crypto.argon2`, so there is no native add-on to compile. (`deriveKey` still uses scrypt; it derives encryption keys, not stored password hashes.)
+
+## Changelog
+
+| Version | Changes |
+| :--- | :--- |
+| 2.0.0 (unreleased) | **Breaking.** Password hashing moves from scrypt to Argon2id (Node's built-in `crypto.argon2`). `hashPassword` / `verifyPassword` are now async; `hashPasswordSync`, `verifyPasswordSync`, `needsRehash`, and `isPasswordHash` added. `verifyPassword` returns `false` instead of throwing for malformed hashes. 1.x scrypt hashes still verify. Requires Node.js ≥ 24.7. |
+| 1.2.0 | The CLI is also installed as `secure-kit`, so `npx @datdm198x/secure-kit ...` works directly. |
+| 1.1.0 | Added the `secret-kit` CLI. |
+| 1.0.6 | Added `generateSecureString` / `generateSecureStrings`. |
 
 ## Testing
 
@@ -646,9 +809,10 @@ Comprehensive test coverage is maintained for all cryptographic operations.
 
 | Test File | Status | Tests |
 | :--- | :--- | :---: |
-| `hash.test.ts` | ✅ Passed | 4 |
+| `hash.test.ts` | ✅ Passed | 3 |
+| `password.test.ts` | ✅ Passed | 16 |
 | `encrypt.test.ts` | ✅ Passed | 5 |
 | `random.test.ts` | ✅ Passed | 10 |
 | `key.test.ts` | ✅ Passed | 4 |
-| `cli.test.ts` | ✅ Passed | 20 |
-| **Total** | **✅ 100%** | **43** |
+| `cli.test.ts` | ✅ Passed | 22 |
+| **Total** | **✅ 100%** | **60** |
