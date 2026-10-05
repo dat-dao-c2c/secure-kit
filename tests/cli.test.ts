@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { mkdtempSync, rmSync, statSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
+import { randomBytes, scryptSync } from 'crypto';
 import { run, CliIO, EXIT_OK, EXIT_FAILED, EXIT_USAGE } from '../src/cli/run.js';
 import { hash } from '../src/index.js';
 
@@ -96,7 +97,7 @@ describe('CLI: hash / hmac', () => {
 describe('CLI: passwords', () => {
   it('hashes and verifies a password from stdin', () => {
     const storedHash = out(cli(['password-hash'], { stdin: 'P@ssw0rd\n' }));
-    expect(storedHash).toMatch(/^[0-9a-f]{32}:[0-9a-f]{128}$/);
+    expect(storedHash).toMatch(/^\$argon2id\$v=19\$m=65536,t=3,p=4\$[A-Za-z0-9+/]{22}\$[A-Za-z0-9+/]{43}$/);
 
     expect(cli(['password-verify', '--hash', storedHash], { stdin: 'P@ssw0rd\n' }).code).toBe(EXIT_OK);
     expect(cli(['password-verify', '--hash', storedHash], { stdin: 'wrong\n' }).code).toBe(EXIT_FAILED);
@@ -110,6 +111,20 @@ describe('CLI: passwords', () => {
 
   it('reports a malformed stored hash as a usage error instead of crashing', () => {
     expect(cli(['password-verify', '--hash', 'abcd:1234'], { stdin: 'x' }).code).toBe(EXIT_USAGE);
+    expect(cli(['password-verify', '--hash', '$argon2id$v=19$m=1,t=1,p=1$x$y'], { stdin: 'x' }).code).toBe(EXIT_USAGE);
+  });
+
+  it('rejects an over-long password as a usage error', () => {
+    const result = cli(['password-hash'], { stdin: 'a'.repeat(1025) });
+    expect(result.code).toBe(EXIT_USAGE);
+    expect(result.stderr).toContain('1024 bytes');
+  });
+
+  it('still verifies legacy 1.x scrypt hashes', () => {
+    const salt = randomBytes(16);
+    const legacy = `${salt.toString('hex')}:${scryptSync('P@ssw0rd', salt, 64, { N: 16384, r: 8, p: 1 }).toString('hex')}`;
+    expect(cli(['password-verify', '--hash', legacy], { stdin: 'P@ssw0rd\n' }).code).toBe(EXIT_OK);
+    expect(cli(['password-verify', '--hash', legacy], { stdin: 'wrong\n' }).code).toBe(EXIT_FAILED);
   });
 });
 

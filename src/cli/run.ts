@@ -5,8 +5,10 @@ import { createPrivateKey, createPublicKey, timingSafeEqual, KeyObject } from 'c
 import {
   hash,
   hmac,
-  hashPassword,
-  verifyPassword,
+  hashPasswordSync,
+  verifyPasswordSync,
+  isPasswordHash,
+  MAX_PASSWORD_BYTES,
   encrypt,
   decrypt,
   encryptAsymmetric,
@@ -239,13 +241,16 @@ const COMMANDS: Record<string, Command> = {
   },
 
   'password-hash': {
-    summary: 'Hash a password read from stdin (scrypt)',
+    summary: 'Hash a password read from stdin (Argon2id)',
     usage: 'password-hash [--raw] < password',
     options: { ...RAW_OPTION },
     run(ctx) {
       const password = readStdinOnly(ctx, 'password');
       if (!password) throw new UsageError('password is empty');
-      writeLine(ctx.io, hashPassword(password));
+      if (Buffer.byteLength(password.normalize('NFKC'), 'utf8') > MAX_PASSWORD_BYTES) {
+        throw new UsageError(`password is longer than ${MAX_PASSWORD_BYTES} bytes`);
+      }
+      writeLine(ctx.io, hashPasswordSync(password));
       return EXIT_OK;
     },
   },
@@ -256,14 +261,11 @@ const COMMANDS: Record<string, Command> = {
     options: { hash: { type: 'string' }, ...QUIET_OPTION, ...RAW_OPTION },
     run(ctx) {
       const storedHash = requireOpt(ctx.values, 'hash');
-      const password = readStdinOnly(ctx, 'password');
-      let isMatch: boolean;
-      try {
-        isMatch = verifyPassword(password, storedHash);
-      } catch {
+      if (!isPasswordHash(storedHash)) {
         throw new UsageError(`malformed --hash (expected output of: ${ctx.prog} password-hash)`);
       }
-      return reportVerification(ctx.io, ctx.values, isMatch);
+      const password = readStdinOnly(ctx, 'password');
+      return reportVerification(ctx.io, ctx.values, verifyPasswordSync(password, storedHash));
     },
   },
 
