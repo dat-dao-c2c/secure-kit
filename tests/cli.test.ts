@@ -141,6 +141,14 @@ describe('CLI: AES encryption', () => {
     expect(wrong.stdout).toBe('');
   });
 
+  it('rejects ciphertext with a truncated auth tag', () => {
+    const env = { DATA_KEY: out(cli(['keygen', 'aes'])) };
+    const [iv, authTag, body] = out(cli(['encrypt', '--key-env', 'DATA_KEY', 'secret'], { env })).split(':');
+    const truncated = cli(['decrypt', '--key-env', 'DATA_KEY', `${iv}:${authTag.slice(0, 8)}:${body}`], { env });
+    expect(truncated.code).toBe(EXIT_FAILED);
+    expect(truncated.stdout).toBe('');
+  });
+
   it('rejects keys that are not 32 bytes of hex', () => {
     expect(cli(['encrypt', '--key-env', 'K', 'x'], { env: { K: 'abc' } }).code).toBe(EXIT_USAGE);
   });
